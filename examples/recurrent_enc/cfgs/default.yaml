@@ -6,19 +6,18 @@ meta:
   device: auto  # auto, cuda, or cpu
 
 data:
-  dataset: cifar10
-  batch_size: 256
+  env_name: robosuite
+  batch_size: 4
   num_workers: 4
-
+  data_path: /home/guglielmo/Projects/authonomus_discovery/to_kill/
+  
 model:
-  # Backbone
-  type: resnet       # resnet, vit_s, vit_b
-  patch_size: 2      # For ViT only
+  # Encoder (RNNEncoder)
+  dobs: 100          # Hidden dimension in encoder
+  henc: 512           # Input channels (grayscale)
 
-  # Projector
-  use_projector: true
-  proj_hidden_dim: 2048
-  proj_output_dim: 2048
+  # Training
+  steps: 4          # Number of prediction steps during training
 
 loss:
   type: vicreg       # vicreg or bcs

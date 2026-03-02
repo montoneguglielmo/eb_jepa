@@ -79,6 +79,6 @@ if __name__ == "__main__":
         pin_memory=True
         )
 
-    for batch_video, batch_robot, batch_action in loader:
-        print(batch_video.shape, batch_robot.shape, batch_action.shape)
+    for batch in loader:
+        print(batch['video'].shape, batch['robot_state'].shape, batch['robot_action'].shape)
     # Output: torch.Size([B, C, T, H, W])

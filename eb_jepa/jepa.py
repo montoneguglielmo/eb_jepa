@@ -118,8 +118,10 @@ class JEPA(JEPAbase):
               predicted_states: List[Tensor] of length nsteps, each [B, D, T_out, H', W']
             - losses: None if compute_loss=False, otherwise tuple of 5 elements:
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
-        """
+        """ 
+        print('observations', observations.shape)            
         state = self.encoder(observations)
+        print('state:', state.shape)
         context_length = getattr(self.predictor, "context_length", 0)
 
         # Compute regularization loss if needed
@@ -143,10 +145,13 @@ class JEPA(JEPAbase):
             predicted_states = state
             for _ in range(nsteps):
                 # Predict all timesteps, discard last (no target for it)
+                print('Predicted states', predicted_states.shape)
+                
                 predicted_states = self.predictor(predicted_states, actions_encoded)[
                     :, :, :-1
                 ]
                 # Collect step if requested
+                print('Predicted_states', predicted_states.shape)
                 if return_all_steps:
                     all_steps.append(predicted_states)
                 # Refeed ground truth context on the left

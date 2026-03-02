@@ -1,12 +1,25 @@
 import fire
+
+import torch
+from torch.optim import AdamW
+from torch.utils.data import DataLoader
+
+
+
 from eb_jepa.training_utils import (
     load_config,
     setup_device,
     setup_seed,
 )
-from eb_jepa.dataset.robosuite import VideoRobosuiteDataset
+from eb_jepa.datasets.robosuite import VideoRobosuiteDataset
 
-from eb_jepa.architectures import RNNPredictor
+from eb_jepa.architectures import RNNEncoder, ResUNet, Projector, StateOnlyPredictor, Transformer
+from eb_jepa.logging import get_logger
+from eb_jepa.jepa import JEPA
+from eb_jepa.losses import SquareLossSeq, VCLoss
+
+
+logger = get_logger(__name__)
 
 
 def run(
@@ -58,7 +71,16 @@ def run(
     # )
 
     logger.info("Loading robosuite dataset...")
-    train_loader = VideoRobosuiteDataset()
+    train_dataset = VideoRobosuiteDataset(cfg.data.data_path)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=cfg.data.batch_size,
+        shuffle=True,
+        num_workers=cfg.data.num_workers,
+        pin_memory=True,
+        drop_last=True,  # Avoid small batches that cause BatchNorm issues
+    )
+    
     #transform = get_train_transforms()
 
     # Use EBJEPA_DSETS environment variable if set, otherwise fall back to config
@@ -102,18 +124,20 @@ def run(
 
     # Initialize model
     logger.info("Initializing model...")
-    encoder = RNNPredictor(action_dim=)
-    predictor_model = ResUNet(2 * cfg.model.dstc, cfg.model.hpre, cfg.model.dstc)
-    projector = Projector(f"{cfg.model.dstc}-{cfg.model.dstc*4}-{cfg.model.dstc*4}")
+    encoder = RNNEncoder(input_size=cfg.model.dobs, hidden_size=cfg.model.henc)
+    predictor_model = Transformer(dim=cfg.model.henc, context_length=2)
+    predictor = StateOnlyPredictor(predictor_model, context_length=2)
 
-    regularizer = None #VCLoss(cfg.loss.std_coeff, cfg.loss.cov_coeff, proj=projector)
+    projector = None #Projector(f"{cfg.model.dstc}-{cfg.model.dstc*4}-{cfg.model.dstc*4}")
+
+    regularizer = VCLoss(cfg.loss.std_coeff, cfg.loss.cov_coeff, proj=projector)
     ploss = SquareLossSeq(projector)
-    jepa = JEPA(encoder, encoder, predictor, regularizer, ploss).to(device)
+    jepa = JEPA(encoder, None, predictor, regularizer, ploss).to(device)
 
-    optimizer = Adam(
-        [
-            {"params": jepa.parameters(), "lr": cfg.optim.lr},
-        ]
+    optimizer = AdamW(
+        jepa.parameters(),
+        lr=cfg.optim.lr,
+        weight_decay=cfg.optim.get("weight_decay", 1e-6),
     )
     
     for batch in train_loader:
@@ -121,6 +145,10 @@ def run(
         video = batch["video"]
         robot_state = batch['robot_state']
         robot_action = batch['robot_action']
+
+        video = video.permute(0,2,1,3,4).flatten(2)
+        x = torch.cat([video, robot_state, robot_action], axis=2)[:, :, :100]
+        print(x.shape)
         
         optimizer.zero_grad()
         _, (jepa_loss, regl, _, regldict, pl) = jepa.unroll(
