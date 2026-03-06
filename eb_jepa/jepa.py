@@ -146,6 +146,7 @@ class JEPA(JEPAbase):
 
         # Parallel mode: process all timesteps at once, refeed GT context
         if unroll_mode == "parallel":
+            past_predictions = []
             for cnt_step in range(nsteps):
                 # Predict all timesteps, discard last (no target for it)
                 print('Iterations:', cnt_step)
@@ -154,11 +155,13 @@ class JEPA(JEPAbase):
                     predicted_states = self.predictor(state, actions_encoded)[
                         :, :, :-1
                     ]
+                    past_predictions.append(predicted_states)
                     print('predicted_states shape', predicted_states.shape)
                 else:
-                    predicted_states = self.predictor(state[:,:,cnt_step:], actions_encoded, predictions=predicted_states)[
+                    predicted_states = self.predictor(state[:,:,cnt_step:], actions_encoded, past_predictions=past_predictions)[
                         :, :, :-1
                     ]
+                    past_predictions.append(predicted_states)
                     print('predicted_states shape', predicted_states.shape)
                 # Collect step if requested
                 if return_all_steps:
