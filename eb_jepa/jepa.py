@@ -119,7 +119,13 @@ class JEPA(JEPAbase):
             - losses: None if compute_loss=False, otherwise tuple of 5 elements:
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
         """
+        
+        print('Observations shape', observations.shape)
+        # observations BxCxTxHxW
         state = self.encoder(observations)
+        # state BxCxTxHxW
+        print('State shape', state.shape)
+        
         context_length = getattr(self.predictor, "context_length", 0)
 
         # Compute regularization loss if needed
@@ -140,21 +146,27 @@ class JEPA(JEPAbase):
 
         # Parallel mode: process all timesteps at once, refeed GT context
         if unroll_mode == "parallel":
-            predicted_states = state
-            for _ in range(nsteps):
+            for cnt_step in range(nsteps):
                 # Predict all timesteps, discard last (no target for it)
-                predicted_states = self.predictor(predicted_states, actions_encoded)[
-                    :, :, :-1
-                ]
+                print('Iterations:', cnt_step)
+                if cnt_step == 0:
+                    print('state shape', state.shape)
+                    predicted_states = self.predictor(state, actions_encoded)[
+                        :, :, :-1
+                    ]
+                    print('predicted_states shape', predicted_states.shape)
+                else:
+                    predicted_states = self.predictor(state[:,:,cnt_step:], actions_encoded, predictions=predicted_states)[
+                        :, :, :-1
+                    ]
+                    print('predicted_states shape', predicted_states.shape)
                 # Collect step if requested
                 if return_all_steps:
                     all_steps.append(predicted_states)
-                # Refeed ground truth context on the left
-                predicted_states = torch.cat(
-                    (state[:, :, :context_length], predicted_states), dim=2
-                )
+                
                 if compute_loss:
-                    ploss += self.predcost(state, predicted_states) / nsteps
+                    ploss += self.predcost(state[:,:,context_length+cnt_step:], predicted_states) / nsteps
+
 
         # Autoregressive mode: step-by-step with sliding window
         # Note: RNN predictors (is_rnn=True) are a special case with ctxt_window_time=1

@@ -120,11 +120,15 @@ class SimplePredictor(nn.Module):
 class StateOnlyPredictor(SimplePredictor):
     """Wrapper for a simple predictor which concatenates states and actions channel wise."""
 
-    def forward(self, x, a):
+    def forward(self, x, a, **kwargs):
         # action not used on purpose
+         if 'predictions' in kwargs:
+            next_state = kwargs['predictions']
+        else:
+            next_state = x[:, :, 1:]  # [B, C, T-1, H, W]
         prev_state = x[:, :, :-1]  # [B, C, T-1, H, W]
-        next_state = x[:, :, 1:]  # [B, C, T-1, H, W]
         combined_xa = torch.cat((prev_state, next_state), dim=1)
+        print('combined_xa', combined_xa.shape)
         return self.predictor(combined_xa)
 
 
