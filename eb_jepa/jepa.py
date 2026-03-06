@@ -119,9 +119,10 @@ class JEPA(JEPAbase):
             - losses: None if compute_loss=False, otherwise tuple of 5 elements:
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
         """ 
-        print('observations', observations.shape)            
+        # Observations BxTxD 4x16x100 
         state = self.encoder(observations)
-        print('state:', state.shape)
+        print('State shape', state.shape)
+        # State BxCxTxD 4x1x16x512
         context_length = getattr(self.predictor, "context_length", 0)
 
         # Compute regularization loss if needed
@@ -145,19 +146,20 @@ class JEPA(JEPAbase):
             predicted_states = state
             for _ in range(nsteps):
                 # Predict all timesteps, discard last (no target for it)
-                print('Predicted states', predicted_states.shape)
-                
+                # predicted_states BxCxTxD 4x1x16x512
                 predicted_states = self.predictor(predicted_states, actions_encoded)[
                     :, :, :-1
                 ]
                 # Collect step if requested
-                print('Predicted_states', predicted_states.shape)
+                print('Predicted_states after predictor', predicted_states.shape)
                 if return_all_steps:
                     all_steps.append(predicted_states)
                 # Refeed ground truth context on the left
                 predicted_states = torch.cat(
                     (state[:, :, :context_length], predicted_states), dim=2
                 )
+                print('state cat shape:', state[:,:, :context_length].shape)
+                print('predicted states after cat: ', predicted_states.shape)
                 if compute_loss:
                     ploss += self.predcost(state, predicted_states) / nsteps
 

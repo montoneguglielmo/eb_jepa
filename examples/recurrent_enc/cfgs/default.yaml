@@ -9,6 +9,7 @@ data:
   env_name: robosuite
   batch_size: 4
   num_workers: 4
+  num_channels: 1
   data_path: /home/guglielmo/Projects/authonomus_discovery/to_kill/
   
 model:

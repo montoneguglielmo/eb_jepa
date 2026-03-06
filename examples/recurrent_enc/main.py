@@ -125,7 +125,7 @@ def run(
     # Initialize model
     logger.info("Initializing model...")
     encoder = RNNEncoder(input_size=cfg.model.dobs, hidden_size=cfg.model.henc)
-    predictor_model = Transformer(dim=cfg.model.henc, context_length=2)
+    predictor_model = Transformer(dim=cfg.model.henc, input_channels=2*cfg.data.num_channels, context_length=2)
     predictor = StateOnlyPredictor(predictor_model, context_length=2)
 
     projector = None #Projector(f"{cfg.model.dstc}-{cfg.model.dstc*4}-{cfg.model.dstc*4}")

@@ -588,7 +588,7 @@ class TransformerBlock(nn.Module):
 # Minimal Transformer Encoder
 # -----------------------------
 class Transformer(nn.Module):
-    def __init__(self, dim, depth=2, num_heads=4, context_length=2):
+    def __init__(self, dim, depth=2, input_channels = 1, num_heads=4, context_length=2):
         super().__init__()
         self.is_rnn = False
         self.layers = nn.ModuleList([
@@ -596,6 +596,8 @@ class Transformer(nn.Module):
             for _ in range(depth)
         ])
         self.context_length=context_length
+        self.input_channels=input_channels
+        self.linear = nn.Linear(contex_lenght*dim, int(self.input_channels/2 * dim))
 
     def forward(self, x):
         # x: [B, C, N, D]
@@ -605,4 +607,6 @@ class Transformer(nn.Module):
         for layer in self.layers:
             x = layer(x)
         x = x.view(B,C,N,D)
-        return x[:, :C-self.context_length+1]
+        print(x.shape)
+        x = self.linear(x)
+        return x

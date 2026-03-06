@@ -7,7 +7,7 @@ meta:
 
 data:
   dataset: moving_mnist
-  batch_size: 64
+  batch_size: 8
   num_workers: 4
 
 model:
