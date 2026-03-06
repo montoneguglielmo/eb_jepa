@@ -122,12 +122,16 @@ class StateOnlyPredictor(SimplePredictor):
 
     def forward(self, x, a, **kwargs):
         # action not used on purpose
-         if 'predictions' in kwargs:
+        next_states = []
+        B, C, T, _, _ = x.shape
+        if 'predictions' in kwargs:
             next_state = kwargs['predictions']
+            prev_state = x[:, :, :-1]  # [B, C, T-1, H, W]
+            combined_xa = torch.cat((prev_state, next_state), dim=1)
         else:
-            next_state = x[:, :, 1:]  # [B, C, T-1, H, W]
-        prev_state = x[:, :, :-1]  # [B, C, T-1, H, W]
-        combined_xa = torch.cat((prev_state, next_state), dim=1)
+            for i in range(self.context_length):
+                next_states.append(x[:,:,i:T-self.context_length+i+1])
+            combined_xa = torch.cat(next_states, dim=1)
         print('combined_xa', combined_xa.shape)
         return self.predictor(combined_xa)
 
