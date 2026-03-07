@@ -150,19 +150,15 @@ class JEPA(JEPAbase):
             for cnt_step in range(nsteps):
                 # Predict all timesteps, discard last (no target for it)
                 print('Iterations:', cnt_step)
-                if cnt_step == 0:
-                    print('state shape', state.shape)
-                    predicted_states = self.predictor(state, actions_encoded)[
-                        :, :, :-1
-                    ]
-                    past_predictions.append(predicted_states)
-                    print('predicted_states shape', predicted_states.shape)
-                else:
-                    predicted_states = self.predictor(state[:,:,cnt_step:], actions_encoded, past_predictions=past_predictions)[
-                        :, :, :-1
-                    ]
-                    past_predictions.append(predicted_states)
-                    print('predicted_states shape', predicted_states.shape)
+                kwargs = {}
+                if past_predictions:
+                    kwargs['past_predictions'] = past_predictions
+                print('state shape', state.shape)
+                predicted_states = self.predictor(state, actions_encoded, **kwargs)[
+                    :, :, :-1
+                ]
+                past_predictions.append(predicted_states)
+                print('predicted_states shape', predicted_states.shape)
                 # Collect step if requested
                 if return_all_steps:
                     all_steps.append(predicted_states)
