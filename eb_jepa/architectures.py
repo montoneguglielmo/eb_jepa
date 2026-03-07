@@ -105,7 +105,12 @@ class ResNet5(TemporalBatchMixin, nn.Module):
 
 
 class SimplePredictor(nn.Module):
-    """Wrapper that concatenates states and actions channel-wise before prediction."""
+    """Wrapper that concatenates states and actions channel-wise before prediction.
+
+    The context window stacking (building the multi-frame buffer) is handled externally
+    in the unroll() method. This wrapper simply concatenates the pre-built state buffer
+    with the action buffer (if provided) before forwarding to the underlying predictor.
+    """
 
     def __init__(self, predictor, context_length):
         super().__init__()
@@ -114,18 +119,9 @@ class SimplePredictor(nn.Module):
         self.context_length = context_length
 
     def forward(self, x, a):
-        return self.predictor(torch.cat([x, a], dim=1))
-
-
-class StateOnlyPredictor(SimplePredictor):
-    """Wrapper for a simple predictor which concatenates states and actions channel wise."""
-
-    def forward(self, x, a):
-        # action not used on purpose
-        prev_state = x[:, :, :-1]  # [B, C, T-1, H, W]
-        next_state = x[:, :, 1:]  # [B, C, T-1, H, W]
-        combined_xa = torch.cat((prev_state, next_state), dim=1)
-        return self.predictor(combined_xa)
+        if a is not None:
+            return self.predictor(torch.cat([x, a], dim=1))
+        return self.predictor(x)
 
 
 class ResUNet(TemporalBatchMixin, nn.Module):

@@ -120,6 +120,7 @@ class JEPA(JEPAbase):
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
         """
         state = self.encoder(observations)
+        B, C, T, H, W = state.shape
         context_length = getattr(self.predictor, "context_length", 0)
 
         # Compute regularization loss if needed
@@ -138,23 +139,49 @@ class JEPA(JEPAbase):
         # Collect all steps if requested
         all_steps = [] if return_all_steps else None
 
-        # Parallel mode: process all timesteps at once, refeed GT context
+        # Parallel mode: process all timesteps at once using a rolling context buffer.
+        # At each step k, the context buffer contains:
+        #   - slots 0..L-2: real GT states shifted by k (anchor states)
+        #   - slot L-1: predictions from the previous step (propagated edge)
+        # This ensures real ground truth is used as context anchor whenever available.
         if unroll_mode == "parallel":
-            predicted_states = state
-            for _ in range(nsteps):
-                # Predict all timesteps, discard last (no target for it)
-                predicted_states = self.predictor(predicted_states, actions_encoded)[
-                    :, :, :-1
-                ]
-                # Collect step if requested
+            prev_predictions = None
+            for k in range(nsteps):
+                T_prime = T - context_length + 1 - k
+
+                if k == 0:
+                    state_slices = [
+                        state[:, :, i : i + T_prime] for i in range(context_length)
+                    ]
+                else:
+                    state_slices = [
+                        state[:, :, k + i : k + i + T_prime]
+                        for i in range(context_length - 1)
+                    ]
+                    state_slices.append(prev_predictions)
+
+                state_buffer = torch.cat(state_slices, dim=1)  # (B, C*L, T', H, W)
+
+                if actions_encoded is not None:
+                    action_slices = [
+                        actions_encoded[:, :, k + i : k + i + T_prime]
+                        for i in range(context_length)
+                    ]
+                    action_buffer = torch.cat(action_slices, dim=1)
+                else:
+                    action_buffer = None
+
+                predictor_out = self.predictor(state_buffer, action_buffer)
+                prev_predictions = predictor_out[:, :, :-1]  # (B, C, T'-1, H, W)
+
                 if return_all_steps:
-                    all_steps.append(predicted_states)
-                # Refeed ground truth context on the left
-                predicted_states = torch.cat(
-                    (state[:, :, :context_length], predicted_states), dim=2
-                )
+                    all_steps.append(prev_predictions)
+
                 if compute_loss:
-                    ploss += self.predcost(state, predicted_states) / nsteps
+                    target = state[:, :, context_length + k : T]
+                    ploss += self.predcost(target, prev_predictions) / nsteps
+
+            predicted_states = prev_predictions
 
         # Autoregressive mode: step-by-step with sliding window
         # Note: RNN predictors (is_rnn=True) are a special case with ctxt_window_time=1
