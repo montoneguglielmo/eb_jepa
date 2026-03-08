@@ -122,7 +122,6 @@ class JEPA(JEPAbase):
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
         """
         state = self.encoder(observations)
-        print('state shape', state.shape)
         B, C, T, H, W = state.shape
         context_length = getattr(self.predictor, "context_length", 0)
 
@@ -156,16 +155,11 @@ class JEPA(JEPAbase):
                 [state[:, :, i : i + T_prime_0] for i in range(context_length)],
                 maxlen=context_length,
             )
-            print("Initial buffer len:", len(buffer), "  Expected: 1" )
             for k in range(nsteps):
                 T_prime = T - context_length + 1 - k
-                print('Step:', k)
-                print('T_prime', T_prime)
-
+                
                 state_slices = [s[:, :, :T_prime] for s in buffer]
-                print('Len of state slice:', len(state_slices))
                 state_buffer = torch.cat(state_slices, dim=1)  # (B, C*L, T', H, W)
-                print('state_buffer shape', state_buffer.shape)
 
                 if actions_encoded is not None:
                     action_slices = [
