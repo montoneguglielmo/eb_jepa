@@ -1,3 +1,5 @@
+from collections import deque
+
 import torch
 import torch.nn as nn
 
@@ -120,6 +122,7 @@ class JEPA(JEPAbase):
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
         """
         state = self.encoder(observations)
+        print('state shape', state.shape)
         B, C, T, H, W = state.shape
         context_length = getattr(self.predictor, "context_length", 0)
 
@@ -139,28 +142,30 @@ class JEPA(JEPAbase):
         # Collect all steps if requested
         all_steps = [] if return_all_steps else None
 
-        # Parallel mode: process all timesteps at once using a rolling context buffer.
-        # At each step k, the context buffer contains:
-        #   - slots 0..L-2: real GT states shifted by k (anchor states)
-        #   - slot L-1: predictions from the previous step (propagated edge)
-        # This ensures real ground truth is used as context anchor whenever available.
+        # Parallel mode: rolling buffer of size context_length.
+        # The buffer starts filled with GT frames and progressively replaces
+        # the oldest slot with each new prediction:
+        #   step 1: [GT(1), GT(2), GT(3)]
+        #   step 2: [GT(2), GT(3), pred(1)]
+        #   step 3: [GT(3), pred(1), pred(2)]
+        #   step 4: [pred(1), pred(2), pred(3)]
+        # Older buffer slots are trimmed to the current T_prime as it shrinks.
         if unroll_mode == "parallel":
-            prev_predictions = None
+            T_prime_0 = T - context_length + 1
+            buffer = deque(
+                [state[:, :, i : i + T_prime_0] for i in range(context_length)],
+                maxlen=context_length,
+            )
+            print("Initial buffer len:", len(buffer), "  Expected: 1" )
             for k in range(nsteps):
                 T_prime = T - context_length + 1 - k
+                print('Step:', k)
+                print('T_prime', T_prime)
 
-                if k == 0:
-                    state_slices = [
-                        state[:, :, i : i + T_prime] for i in range(context_length)
-                    ]
-                else:
-                    state_slices = [
-                        state[:, :, k + i : k + i + T_prime]
-                        for i in range(context_length - 1)
-                    ]
-                    state_slices.append(prev_predictions)
-
+                state_slices = [s[:, :, :T_prime] for s in buffer]
+                print('Len of state slice:', len(state_slices))
                 state_buffer = torch.cat(state_slices, dim=1)  # (B, C*L, T', H, W)
+                print('state_buffer shape', state_buffer.shape)
 
                 if actions_encoded is not None:
                     action_slices = [
@@ -172,16 +177,17 @@ class JEPA(JEPAbase):
                     action_buffer = None
 
                 predictor_out = self.predictor(state_buffer, action_buffer)
-                prev_predictions = predictor_out[:, :, :-1]  # (B, C, T'-1, H, W)
+                pred = predictor_out[:, :, :-1]  # (B, C, T'-1, H, W)
+                buffer.append(pred)  # drops oldest slot, adds latest prediction
 
                 if return_all_steps:
-                    all_steps.append(prev_predictions)
+                    all_steps.append(pred)
 
                 if compute_loss:
                     target = state[:, :, context_length + k : T]
-                    ploss += self.predcost(target, prev_predictions) / nsteps
+                    ploss += self.predcost(target, pred) / nsteps
 
-            predicted_states = prev_predictions
+            predicted_states = pred
 
         # Autoregressive mode: step-by-step with sliding window
         # Note: RNN predictors (is_rnn=True) are a special case with ctxt_window_time=1
