@@ -477,3 +477,36 @@ class InverseDynamicsModel(nn.Module):
         """
         combined_states = torch.cat([state_t, state_t_plus_1], dim=1)
         return self.model(combined_states)
+     
+    
+class ActionEncoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.encoder = nn.Sequential(
+            nn.Linear(2, 256),
+            nn.ReLU(),
+            nn.Linear(256, 16 * 65 * 65)
+        )
+
+    def forward(self, x):
+        # x shape: (6, 2, 17)
+
+        b, c, t = x.shape
+
+        # move encoding dimension to last
+        x = x.permute(0, 2, 1)          # (6,17,2)
+
+        # flatten untouched dimensions
+        x = x.reshape(-1, 2)            # (6*17,2)
+
+        # encode
+        x = self.encoder(x)             # (6*17, 16*65*65)
+
+        # reshape back
+        x = x.view(b, t, 16, 65, 65)    # (6,17,16,65,65)
+
+        # final desired order
+        x = x.permute(0, 2, 1, 3, 4)    # (6,16,17,65,65)
+
+        return x

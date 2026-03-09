@@ -20,6 +20,7 @@ from eb_jepa.architectures import (
     ResUNet,
     SimplePredictor,
     InverseDynamicsModel,
+    ActionEncoder,
 )
 from eb_jepa.datasets.utils import init_data
 from eb_jepa.jepa import JEPA, JEPAProbe
@@ -48,7 +49,7 @@ logger = get_logger(__name__)
 
 
 def run(
-    fname: str = "examples/ac_video_jepa/cfgs/train.yaml",
+    fname: str = "examples/ac_video_parallel_jepa/cfgs/train.yaml",
     cfg=None,
     folder=None,
     **overrides,
@@ -174,12 +175,15 @@ def run(
         )
     )
     encoder = ResNet5(cfg.model.dobs, cfg.model.henc, cfg.model.dstc)
-    predictor = ResUNet(3 * cfg.model.dstc, cfg.model.hpre, cfg.model.dstc)
+    predictor = ResUNet(4 * cfg.model.dstc, cfg.model.hpre, cfg.model.dstc)
+    predictor = SimplePredictor(predictor, context_length=2)
+
 
     test_output = encoder(test_input)
     _, f, _, h, w = test_output.shape
     
-    aencoder = nn.Identity()
+    aencoder = ActionEncoder()
+    
     if cfg.model.regularizer.use_proj:
         projector = Projector(
             f"{encoder.mlp_output_dim}-{encoder.mlp_output_dim*4}-{encoder.mlp_output_dim*4}"
@@ -311,12 +315,12 @@ def run(
             # Calculate JEPA loss
             jepa_optimizer.zero_grad()
             with autocast(device.type, enabled=use_amp, dtype=dtype):
+                print('x shape:', x.shape)
                 _, (jepa_loss, regl, regl_unweight, regldict, pl) = jepa.unroll(
                     x,
                     a,
                     nsteps=cfg.model.nsteps,
-                    unroll_mode="autoregressive",
-                    ctxt_window_time=1,
+                    unroll_mode="parallel",
                     compute_loss=True,
                     return_all_steps=False,
                 )

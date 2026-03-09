@@ -9,15 +9,15 @@ logging:
 meta:
   model_folder:
   load_model: true
-  enable_plan_eval: true
+  enable_plan_eval: false
   eval_every_itr: -1
   light_eval_freq: 50
   seed: 1
 data:
   env_name: two_rooms
   # Training-specific overrides (base config in eb_jepa/datasets/two_rooms/data_config.yaml)
-  batch_size: 384
-  num_workers: 16
+  batch_size: 6
+  num_workers: 1
   pin_mem: true
   persistent_workers: true
 training:
@@ -25,13 +25,24 @@ training:
   dtype: bfloat16
 model:
   # Encoder (ResNet5)
-  dobs: 1           # Input channels (grayscale)
+  dobs: 2           # Input channels (grayscale)
   henc: 32          # Hidden dimension in encoder
   dstc: 16          # Output representation dimension
   # Predictor (ResUNet)
   hpre: 32          # Hidden dimension in predictor
   # Training
-  steps: 5          # Number of prediction steps during training
+  nsteps: 3         # Number of prediction steps during training
+  encoder_architecture: resnet
+  compile: false
+  regularizer:
+    cov_coeff: 8
+    std_coeff: 16 # 4.0
+    sim_coeff_t: 12 # 0.75 in PLDM
+    idm_coeff: 1
+    use_proj: false
+    idm_after_proj: false
+    spatial_as_samples: true
+    sim_t_after_proj: false
 optim:
   epochs: 12
   lr: 0.001
