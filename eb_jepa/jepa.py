@@ -122,7 +122,6 @@ class JEPA(JEPAbase):
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
         """
         state = self.encoder(observations)
-        print('state shape:', state.shape)
         B, C, T, H, W = state.shape
         context_length = getattr(self.predictor, "context_length", 0)
 
@@ -138,8 +137,6 @@ class JEPA(JEPAbase):
             actions_encoded = self.action_encoder(actions)
         else:
             actions_encoded = None
-
-        print('actions_encoded shape', actions_encoded.shape)
 
         # Collect all steps if requested
         all_steps = [] if return_all_steps else None
@@ -173,8 +170,6 @@ class JEPA(JEPAbase):
                 else:
                     action_buffer = None
 
-                print('state_buffer shape', state_buffer.shape)
-                print('action_buffer shape', action_buffer.shape)
                 predictor_out = self.predictor(state_buffer, action_buffer)
                 pred = predictor_out[:, :, :-1]  # (B, C, T'-1, H, W)
                 buffer.append(pred)  # drops oldest slot, adds latest prediction

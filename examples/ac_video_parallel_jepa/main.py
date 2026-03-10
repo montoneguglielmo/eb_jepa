@@ -27,7 +27,7 @@ from eb_jepa.jepa import JEPA, JEPAProbe
 from eb_jepa.logging import get_logger
 from eb_jepa.losses import SquareLossSeq, VC_IDM_Sim_Regularizer
 from eb_jepa.schedulers import CosineWithWarmup
-from eb_jepa.state_decoder import MLPXYHead
+from eb_jepa.state_decoder import SpatialMLPXYHead
 from eb_jepa.training_utils import (
     get_default_dev_name,
     get_exp_name,
@@ -174,15 +174,17 @@ def run(
             data_config.img_size,
         )
     )
+    
+    context_lenght = cfg.model.ctxtwind
     encoder = ResNet5(cfg.model.dobs, cfg.model.henc, cfg.model.dstc)
-    predictor = ResUNet(4 * cfg.model.dstc, cfg.model.hpre, cfg.model.dstc)
-    predictor = SimplePredictor(predictor, context_length=2)
-
-
+    # In input we would concatenate sensor encoding and action times the number of contenxt window
+    predictor = ResUNet(context_lenght * 2 * cfg.model.dstc, cfg.model.hpre, cfg.model.dstc)
+    predictor = SimplePredictor(predictor, context_length=context_lenght)
+    
     test_output = encoder(test_input)
     _, f, _, h, w = test_output.shape
-    
-    aencoder = ActionEncoder()
+        
+    aencoder = ActionEncoder(hdim=cfg.model.hactenc, dstc=cfg.model.dstc, hight=h, width=w)
     
     if cfg.model.regularizer.use_proj:
         projector = Projector(
@@ -222,8 +224,8 @@ def run(
     log_config(cfg)
 
     # -- PROBER
-    xy_head = MLPXYHead(
-        input_shape=test_output.shape[1],
+    xy_head = SpatialMLPXYHead(
+        input_shape=f * h * w,
         normalizer=loader.dataset.normalizer,
     ).to(device)
     xy_prober = JEPAProbe(
@@ -315,7 +317,6 @@ def run(
             # Calculate JEPA loss
             jepa_optimizer.zero_grad()
             with autocast(device.type, enabled=use_amp, dtype=dtype):
-                print('x shape:', x.shape)
                 _, (jepa_loss, regl, regl_unweight, regldict, pl) = jepa.unroll(
                     x,
                     a,

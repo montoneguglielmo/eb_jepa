@@ -480,13 +480,19 @@ class InverseDynamicsModel(nn.Module):
      
     
 class ActionEncoder(nn.Module):
-    def __init__(self):
+    def __init__(self, dobs=2, hdim=256, dstc=16, hight=65, width=65):
         super().__init__()
 
+        self.dobs = dobs
+        self.dstc = dstc
+        self.width = width
+        self.hight = hight
+        self.hdim = hdim
+
         self.encoder = nn.Sequential(
-            nn.Linear(2, 256),
+            nn.Linear(self.dobs, self.hdim),
             nn.ReLU(),
-            nn.Linear(256, 16 * 65 * 65)
+            nn.Linear(self.hdim, self.dstc * self.width * self.hight)
         )
 
     def forward(self, x):
@@ -504,7 +510,7 @@ class ActionEncoder(nn.Module):
         x = self.encoder(x)             # (6*17, 16*65*65)
 
         # reshape back
-        x = x.view(b, t, 16, 65, 65)    # (6,17,16,65,65)
+        x = x.view(b, t, self.dstc, self.hight, self.width)    # (6,17,16,65,65)
 
         # final desired order
         x = x.permute(0, 2, 1, 3, 4)    # (6,16,17,65,65)

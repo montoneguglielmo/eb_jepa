@@ -25,11 +25,14 @@ training:
   dtype: bfloat16
 model:
   # Encoder (ResNet5)
-  dobs: 2           # Input channels (grayscale)
+  dobs: 2           # Input channels
   henc: 32          # Hidden dimension in encoder
   dstc: 16          # Output representation dimension
   # Predictor (ResUNet)
   hpre: 32          # Hidden dimension in predictor
+  ctxtwind: 3       # Context window
+  # Action encoder
+  hactenc: 256
   # Training
   nsteps: 3         # Number of prediction steps during training
   encoder_architecture: resnet
