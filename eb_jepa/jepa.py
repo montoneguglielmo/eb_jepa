@@ -157,7 +157,7 @@ class JEPA(JEPAbase):
             )
             for k in range(nsteps):
                 T_prime = T - context_length + 1 - k
-                
+
                 state_slices = [s[:, :, :T_prime] for s in buffer]
                 state_buffer = torch.cat(state_slices, dim=1)  # (B, C*L, T', H, W)
 

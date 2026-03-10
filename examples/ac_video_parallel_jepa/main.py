@@ -14,13 +14,12 @@ from torch.optim import AdamW
 from tqdm import tqdm
 
 from eb_jepa.architectures import (
-    DetHead,
+    ActionEncoder,
+    InverseDynamicsModel,
     Projector,
     ResNet5,
     ResUNet,
     SimplePredictor,
-    InverseDynamicsModel,
-    ActionEncoder,
 )
 from eb_jepa.datasets.utils import init_data
 from eb_jepa.jepa import JEPA, JEPAProbe
@@ -174,18 +173,22 @@ def run(
             data_config.img_size,
         )
     )
-    
+
     context_lenght = cfg.model.ctxtwind
     encoder = ResNet5(cfg.model.dobs, cfg.model.henc, cfg.model.dstc)
     # In input we would concatenate sensor encoding and action times the number of contenxt window
-    predictor = ResUNet(context_lenght * 2 * cfg.model.dstc, cfg.model.hpre, cfg.model.dstc)
+    predictor = ResUNet(
+        context_lenght * 2 * cfg.model.dstc, cfg.model.hpre, cfg.model.dstc
+    )
     predictor = SimplePredictor(predictor, context_length=context_lenght)
-    
+
     test_output = encoder(test_input)
     _, f, _, h, w = test_output.shape
-        
-    aencoder = ActionEncoder(hdim=cfg.model.hactenc, dstc=cfg.model.dstc, hight=h, width=w)
-    
+
+    aencoder = ActionEncoder(
+        hdim=cfg.model.hactenc, dstc=cfg.model.dstc, hight=h, width=w
+    )
+
     if cfg.model.regularizer.use_proj:
         projector = Projector(
             f"{encoder.mlp_output_dim}-{encoder.mlp_output_dim*4}-{encoder.mlp_output_dim*4}"

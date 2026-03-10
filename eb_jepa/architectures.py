@@ -477,8 +477,8 @@ class InverseDynamicsModel(nn.Module):
         """
         combined_states = torch.cat([state_t, state_t_plus_1], dim=1)
         return self.model(combined_states)
-     
-    
+
+
 class ActionEncoder(nn.Module):
     def __init__(self, dobs=2, hdim=256, dstc=16, hight=65, width=65):
         super().__init__()
@@ -492,7 +492,7 @@ class ActionEncoder(nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(self.dobs, self.hdim),
             nn.ReLU(),
-            nn.Linear(self.hdim, self.dstc * self.width * self.hight)
+            nn.Linear(self.hdim, self.dstc * self.width * self.hight),
         )
 
     def forward(self, x):
@@ -501,18 +501,18 @@ class ActionEncoder(nn.Module):
         b, c, t = x.shape
 
         # move encoding dimension to last
-        x = x.permute(0, 2, 1)          # (6,17,2)
+        x = x.permute(0, 2, 1)  # (6,17,2)
 
         # flatten untouched dimensions
-        x = x.reshape(-1, 2)            # (6*17,2)
+        x = x.reshape(-1, 2)  # (6*17,2)
 
         # encode
-        x = self.encoder(x)             # (6*17, 16*65*65)
+        x = self.encoder(x)  # (6*17, 16*65*65)
 
         # reshape back
-        x = x.view(b, t, self.dstc, self.hight, self.width)    # (6,17,16,65,65)
+        x = x.view(b, t, self.dstc, self.hight, self.width)  # (6,17,16,65,65)
 
         # final desired order
-        x = x.permute(0, 2, 1, 3, 4)    # (6,16,17,65,65)
+        x = x.permute(0, 2, 1, 3, 4)  # (6,16,17,65,65)
 
         return x
