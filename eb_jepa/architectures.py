@@ -107,7 +107,12 @@ class ResNet5(TemporalBatchMixin, nn.Module):
 
 
 class SimplePredictor(nn.Module):
-    """Wrapper that concatenates states and actions channel-wise before prediction."""
+    """Wrapper that concatenates states and actions channel-wise before prediction.
+
+    The context window stacking (building the multi-frame buffer) is handled externally
+    in the unroll() method. This wrapper simply concatenates the pre-built state buffer
+    with the action buffer (if provided) before forwarding to the underlying predictor.
+    """
 
     def __init__(self, predictor, context_length):
         super().__init__()
@@ -116,19 +121,9 @@ class SimplePredictor(nn.Module):
         self.context_length = context_length
 
     def forward(self, x, a):
-        return self.predictor(torch.cat([x, a], dim=1))
-
-
-class StateOnlyPredictor(SimplePredictor):
-    """Wrapper for a simple predictor which concatenates states and actions channel wise."""
-
-    def forward(self, x, a):
-        # action not used on purpose
-        prev_state = x[:, :, :-1]  # [B, C, T-1, H, W]
-        next_state = x[:, :, 1:]  # [B, C, T-1, H, W]
-        combined_xa = torch.cat((prev_state, next_state), dim=1)
-        print('combined_xa', combined_xa.shape)
-        return self.predictor(combined_xa)
+        if a is not None:
+            return self.predictor(torch.cat([x, a], dim=1))
+        return self.predictor(x)
 
 
 class ResUNet(TemporalBatchMixin, nn.Module):
@@ -510,103 +505,42 @@ class InverseDynamicsModel(nn.Module):
         """
         combined_states = torch.cat([state_t, state_t_plus_1], dim=1)
         return self.model(combined_states)
-    
-######Transformer Architecture##########
 
-# -----------------------------
-# Multi-Head Self Attention
-# -----------------------------
-class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, dim, num_heads):
+
+class ActionEncoder(nn.Module):
+    def __init__(self, dobs=2, hdim=256, dstc=16, hight=65, width=65):
         super().__init__()
-        assert dim % num_heads == 0
 
-        self.num_heads = num_heads
-        self.head_dim = dim // num_heads
+        self.dobs = dobs
+        self.dstc = dstc
+        self.width = width
+        self.hight = hight
+        self.hdim = hdim
 
-        self.qkv = nn.Linear(dim, dim * 3)
-        self.proj = nn.Linear(dim, dim)
-
-    def forward(self, x):
-        # x: [B, N, D]
-        B, N, D = x.shape
-
-        qkv = self.qkv(x)  # [B, N, 3D]
-        qkv = qkv.reshape(B, N, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)
-        q, k, v = qkv  # each: [B, heads, N, head_dim]
-
-        # scaled dot-product attention
-        attn = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        attn = attn.softmax(dim=-1)
-
-        out = attn @ v  # [B, heads, N, head_dim]
-
-        out = out.transpose(1, 2).reshape(B, N, D)
-        return self.proj(out)
-
-
-# -----------------------------
-# Feed Forward Network
-# -----------------------------
-class FeedForward(nn.Module):
-    def __init__(self, dim, hidden_dim):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, dim),
+        self.encoder = nn.Sequential(
+            nn.Linear(self.dobs, self.hdim),
+            nn.ReLU(),
+            nn.Linear(self.hdim, self.dstc * self.width * self.hight),
         )
 
     def forward(self, x):
-        return self.net(x)
+        # x shape: (6, 2, 17)
 
+        b, c, t = x.shape
 
-# -----------------------------
-# Transformer Block
-# -----------------------------
-class TransformerBlock(nn.Module):
-    def __init__(self, dim, num_heads, mlp_ratio=4):
-        super().__init__()
-        
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = MultiHeadSelfAttention(dim, num_heads)
+        # move encoding dimension to last
+        x = x.permute(0, 2, 1)  # (6,17,2)
 
-        self.norm2 = nn.LayerNorm(dim)
-        self.ffn = FeedForward(dim, dim * mlp_ratio)
+        # flatten untouched dimensions
+        x = x.reshape(-1, 2)  # (6*17,2)
 
-    def forward(self, x):
-        # Attention + residual
-        x = x + self.attn(self.norm1(x))
+        # encode
+        x = self.encoder(x)  # (6*17, 16*65*65)
 
-        # FFN + residual
-        x = x + self.ffn(self.norm2(x))
-        return x
+        # reshape back
+        x = x.view(b, t, self.dstc, self.hight, self.width)  # (6,17,16,65,65)
 
+        # final desired order
+        x = x.permute(0, 2, 1, 3, 4)  # (6,16,17,65,65)
 
-# -----------------------------
-# Minimal Transformer Encoder
-# -----------------------------
-class Transformer(nn.Module):
-    def __init__(self, dim, depth=2, input_channels = 1, num_heads=4, context_length=2):
-        super().__init__()
-        self.is_rnn = False
-        self.layers = nn.ModuleList([
-            TransformerBlock(dim, num_heads)
-            for _ in range(depth)
-        ])
-        self.context_length=context_length
-        self.input_channels=input_channels
-        self.linear = nn.Linear(contex_lenght*dim, int(self.input_channels/2 * dim))
-
-    def forward(self, x):
-        # x: [B, C, N, D]
-        
-        B, C, N, D = x.shape
-        x = x.view(B,C*N, D)
-        for layer in self.layers:
-            x = layer(x)
-        x = x.view(B,C,N,D)
-        print(x.shape)
-        x = self.linear(x)
         return x
