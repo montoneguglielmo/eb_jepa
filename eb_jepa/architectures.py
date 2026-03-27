@@ -544,3 +544,110 @@ class ActionEncoder(nn.Module):
         x = x.permute(0, 2, 1, 3, 4)  # (6,16,17,65,65)
 
         return x
+    
+
+######Transformer Architecture##########
+
+# -----------------------------
+# Multi-Head Self Attention
+# -----------------------------
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, dim, num_heads):
+        super().__init__()
+        assert dim % num_heads == 0
+
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+
+        self.qkv = nn.Linear(dim, dim * 3)
+        self.proj = nn.Linear(dim, dim)
+
+    def forward(self, x):
+        # x: [B, N, D]
+        B, N, D = x.shape
+
+        qkv = self.qkv(x)  # [B, N, 3D]
+        qkv = qkv.reshape(B, N, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)
+        q, k, v = qkv  # each: [B, heads, N, head_dim]
+
+        # scaled dot-product attention
+        attn = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        attn = attn.softmax(dim=-1)
+
+        out = attn @ v  # [B, heads, N, head_dim]
+
+        out = out.transpose(1, 2).reshape(B, N, D)
+        return self.proj(out)
+
+
+# -----------------------------
+# Feed Forward Network
+# -----------------------------
+class FeedForward(TemporalBatchMixin, nn.Module):
+    
+    """
+    A feedforward network .
+    Supports both 2D [B, C] and 3D [B, C, T] inputs via TemporalBatchMixin.
+    """
+    
+    def __init__(self, dim, hidden_dim, output_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def _forward(self, x):
+        return self.net(x)
+
+
+# -----------------------------
+# Transformer Block
+# -----------------------------
+class TransformerBlock(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4):
+        super().__init__()
+        
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = MultiHeadSelfAttention(dim, num_heads)
+
+        self.norm2 = nn.LayerNorm(dim)
+        self.ffn = FeedForward(dim, dim * mlp_ratio)
+
+    def forward(self, x):
+        # Attention + residual
+        x = x + self.attn(self.norm1(x))
+
+        # FFN + residual
+        x = x + self.ffn(self.norm2(x))
+        return x
+
+
+# -----------------------------
+# Minimal Transformer Encoder
+# -----------------------------
+class Transformer(nn.Module):
+    def __init__(self, dim, depth=2, input_channels = 1, num_heads=4, context_length=2):
+        super().__init__()
+        self.is_rnn = False
+        self.layers = nn.ModuleList([
+            TransformerBlock(dim, num_heads)
+            for _ in range(depth)
+        ])
+        self.context_length=context_length
+        self.input_channels=input_channels
+        self.linear = nn.Linear(contex_lenght*dim, int(self.input_channels/2 * dim))
+
+    def forward(self, x):
+        # x: [B, C, N, D]
+        
+        B, C, N, D = x.shape
+        x = x.view(B,C*N, D)
+        for layer in self.layers:
+            x = layer(x)
+        x = x.view(B,C,N,D)
+        print(x.shape)
+        x = self.linear(x)
+        return x
