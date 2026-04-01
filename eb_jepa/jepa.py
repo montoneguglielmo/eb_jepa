@@ -122,8 +122,10 @@ class JEPA(JEPAbase):
               (total_loss, reg_loss, reg_loss_unweighted, reg_loss_dict, pred_loss)
         """ 
         # Observations BxTxD 4x16x100 
+        print('Observation shape', observations.shape)
         state = self.encoder(observations)
-        B, C, T, H, W = state.shape
+        print('State shape:', state.shape)
+        B, C, T = state.shape[:3]
         context_length = getattr(self.predictor, "context_length", 0)
 
         # Compute regularization loss if needed
@@ -171,6 +173,7 @@ class JEPA(JEPAbase):
                 else:
                     action_buffer = None
 
+                print('state_buffer shape', state_buffer.shape)
                 predictor_out = self.predictor(state_buffer, action_buffer)
                 pred = predictor_out[:, :, :-1]  # (B, C, T'-1, H, W)
                 buffer.append(pred)  # drops oldest slot, adds latest prediction

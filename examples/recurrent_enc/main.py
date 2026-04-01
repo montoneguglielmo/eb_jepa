@@ -13,11 +13,13 @@ from eb_jepa.training_utils import (
 )
 from eb_jepa.datasets.robosuite import VideoRobosuiteDataset
 
-from eb_jepa.architectures import RNNEncoder, ResUNet, ResNet5, FeedForward, Projector, Transformer
+from eb_jepa.architectures import RNNEncoder, ResUNet, ResNet5, FeedForward, Projector, Transformer, SimplePredictor
 from eb_jepa.logging import get_logger
 from eb_jepa.jepa import JEPA
 from eb_jepa.losses import SquareLossSeq, VCLoss
 from eb_jepa.datasets.utils import init_data
+
+from itertools import chain
 
 
 logger = get_logger(__name__)
@@ -123,46 +125,49 @@ def run(
     # Initialize model
     logger.info("Initializing model...")
 
-    video_encoder = ResNet5(in_d=2, h_d=cfg.model.v_enc.hdim, out_d=cfg.model.v_enc.odim, avg_pool=True)
-    action_encoder = FeedForward(dim=2, hidden_dim=cfg.model.a_enc.hdim, output_dim=cfg.model.a_enc.odim)
+    video_encoder = ResNet5(in_d=2, h_d=cfg.model.v_enc.hdim, out_d=cfg.model.v_enc.odim, avg_pool=True).to(device)
+    action_encoder = FeedForward(dim=2, hidden_dim=cfg.model.a_enc.hdim, output_dim=cfg.model.a_enc.odim).to(device)
     input_encoder = RNNEncoder(input_size=cfg.model.dobs, hidden_size=cfg.model.henc)
     
-    #predictor_model = Transformer(dim=cfg.model.henc, input_channels=2*cfg.data.num_channels, context_length=2)
-    #predictor = StateOnlyPredictor(predictor_model, context_length=2)
+    predictor_model = Transformer(dim=cfg.model.henc, context_length=2)
+    predictor = SimplePredictor(predictor_model, context_length=2)
 
-    #projector = None #Projector(f"{cfg.model.dstc}-{cfg.model.dstc*4}-{cfg.model.dstc*4}")
+    projector = None #Projector(f"{cfg.model.dstc}-{cfg.model.dstc*4}-{cfg.model.dstc*4}")
+    regularizer = VCLoss(cfg.loss.std_coeff, cfg.loss.cov_coeff, proj=projector)
+    ploss = SquareLossSeq(projector)
+    jepa = JEPA(input_encoder, None, predictor, regularizer, ploss).to(device)
 
-    # regularizer = VCLoss(cfg.loss.std_coeff, cfg.loss.cov_coeff, proj=projector)
-    # ploss = SquareLossSeq(projector)
-    # jepa = JEPA(encoder, None, predictor, regularizer, ploss).to(device)
-
-    # optimizer = AdamW(
-    #     jepa.parameters(),
-    #     lr=cfg.optim.lr,
-    #     weight_decay=cfg.optim.get("weight_decay", 1e-6),
-    # )
+    optimizer = AdamW(
+        chain(
+            jepa.parameters(),
+            video_encoder.parameters(),
+            action_encoder.parameters(),
+        ),
+        lr=cfg.optim.lr,
+        weight_decay=cfg.optim.get("weight_decay", 1e-6),
+    )
     
     for (x, a, loc, _, _) in loader:
-        x_encoded = video_encoder(x)
-        a_encoded = action_encoder(a)
-        print(x_encoded.shape)
-        print(a_encoded.shape)
-        # a_encoded = action_encoder(a.permute(0,2,1))
-        # observations = torch.cat([x_encoded, a_encoded])
-        
-        # print('Observations shape', observations.shape)
-        
-        # optimizer.zero_grad()
-        # _, (jepa_loss, regl, _, regldict, pl) = jepa.unroll(
-        #     x,
-        #     actions=None,
-        #     nsteps=cfg.model.steps,
-        #     unroll_mode="parallel",
-        #     compute_loss=True,
-        #     return_all_steps=False,
-        # )
-        # jepa_loss.backward()
-        # optimizer.step()
+
+        optimizer.zero_grad()
+
+        x_encoded = video_encoder(x.to(device))
+        a_encoded = action_encoder(a.to(device))
+    
+        print('x_encoded shape', x_encoded.shape)
+        print('a_encoded shape', a_encoded.shape)
+        observations = torch.cat([x_encoded, a_encoded], dim=1)
+        observations = observations.transpose(1, 2)
+        _, (jepa_loss, regl, _, regldict, pl) = jepa.unroll(
+            observations,
+            actions=None,
+            nsteps=cfg.model.steps,
+            unroll_mode="parallel",
+            compute_loss=True,
+            return_all_steps=False,
+        )
+        jepa_loss.backward()
+        optimizer.step()
 
 
 if __name__ == "__main__":

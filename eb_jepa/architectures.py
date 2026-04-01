@@ -467,6 +467,7 @@ class RNNEncoder(nn.Module):
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
+            batch_first=True
             )
 
         self.final_ln = final_ln
@@ -562,20 +563,41 @@ class MultiHeadSelfAttention(nn.Module):
         self.qkv = nn.Linear(dim, dim * 3)
         self.proj = nn.Linear(dim, dim)
 
-    def forward(self, x):
-        # x: [B, N, D]
+    def forward(self, x, mask=None):
+        """
+        x:    [B, N, D]
+        mask: [N, N] or [B, N, N]
+              values = 0 (allowed) or -inf (blocked)
+        """
+
         B, N, D = x.shape
 
-        qkv = self.qkv(x)  # [B, N, 3D]
+        # ---- QKV projection ----
+        qkv = self.qkv(x)                     # [B, N, 3D]
         qkv = qkv.reshape(B, N, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
-        q, k, v = qkv  # each: [B, heads, N, head_dim]
 
-        # scaled dot-product attention
+        q, k, v = qkv                         # [B, H, N, Hd]
+
+        # ---- scaled dot-product attention ----
         attn = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        attn = attn.softmax(dim=-1)
+        # attn: [B, H, N, N]
 
-        out = attn @ v  # [B, heads, N, head_dim]
+        if mask is not None:
+            if mask.dim() == 2:
+                # [N,N] → [1,1,N,N]
+                attn = attn + mask.unsqueeze(0).unsqueeze(0)
+            elif mask.dim() == 3:
+                # [B,N,N] → [B,1,N,N]
+                attn = attn + mask.unsqueeze(1)
+            else:
+                raise ValueError("Mask must be [N,N] or [B,N,N]")
+
+        # softmax AFTER masking
+        attn = torch.softmax(attn, dim=-1)
+
+        # ---- weighted sum ----
+        out = attn @ v                         # [B, H, N, Hd]
 
         out = out.transpose(1, 2).reshape(B, N, D)
         return self.proj(out)
@@ -614,13 +636,18 @@ class TransformerBlock(nn.Module):
         self.attn = MultiHeadSelfAttention(dim, num_heads)
 
         self.norm2 = nn.LayerNorm(dim)
-        self.ffn = FeedForward(dim, dim * mlp_ratio)
+        self.ffn = nn.Sequential(
+            nn.Linear(dim, dim * mlp_ratio),
+            nn.GELU(),
+            nn.Linear(dim * mlp_ratio, dim),
+        )
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         # Attention + residual
-        x = x + self.attn(self.norm1(x))
+        x = x + self.attn(self.norm1(x), mask=mask)
 
         # FFN + residual
+        print('x_shape', x.shape)
         x = x + self.ffn(self.norm2(x))
         return x
 
@@ -629,7 +656,7 @@ class TransformerBlock(nn.Module):
 # Minimal Transformer Encoder
 # -----------------------------
 class Transformer(nn.Module):
-    def __init__(self, dim, depth=2, input_channels = 1, num_heads=4, context_length=2):
+    def __init__(self, dim, depth=2, num_heads=4, context_length=2):
         super().__init__()
         self.is_rnn = False
         self.layers = nn.ModuleList([
@@ -637,17 +664,37 @@ class Transformer(nn.Module):
             for _ in range(depth)
         ])
         self.context_length=context_length
-        self.input_channels=input_channels
-        self.linear = nn.Linear(contex_lenght*dim, int(self.input_channels/2 * dim))
 
     def forward(self, x):
-        # x: [B, C, N, D]
-        
         B, C, N, D = x.shape
-        x = x.view(B,C*N, D)
+        x = x.permute(0, 2, 1, 3)   # [B,N,C,D]
+        x = x.reshape(B, N*C, D)
+
+        mask = attn_mask(N, C, x.device)
+
         for layer in self.layers:
-            x = layer(x)
-        x = x.view(B,C,N,D)
-        print(x.shape)
-        x = self.linear(x)
+            x = layer(x, mask=mask)
+
+        x = x.view(B, N, C, D).permute(0, 2, 1, 3)
+        x = x[:, : C // self.context_length, :, :]  # [B, L, N, D]
         return x
+
+def build_time_indices(N, C, device):
+    # [N*C]
+    t = torch.arange(N, device=device)
+    t = t.repeat_interleave(C)
+    return t    
+
+def causal_mask(N, C, device):
+    t = build_time_indices(N, C, device)
+
+    # compare every pair
+    mask = t.unsqueeze(0) >= t.unsqueeze(1)
+
+    # True = allowed, False = blocked
+    return mask
+
+def attn_mask(N, C, device):
+    mask = causal_mask(N, C, device)
+    mask = (~mask) * float("-inf")
+    return mask
